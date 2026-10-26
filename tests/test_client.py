@@ -131,14 +131,14 @@ class TestLazyInit:
 
     def test_mp_is_none_initially(self) -> None:
         client = MixpanelClient(token="test-token")
-        assert client._mp is None
+        assert getattr(client._local, "mp", None) is None
 
     def test_mp_is_cached(self, client: MixpanelClient) -> None:
-        """The Mixpanel instance is created once and reused."""
+        """The Mixpanel instance is created once per thread and reused."""
         client.track("user-123", "Event 1")
-        mp_first = client._mp
+        mp_first = client._local.mp
         client.track("user-123", "Event 2")
-        mp_second = client._mp
+        mp_second = client._local.mp
         assert mp_first is mp_second
 
     def test_custom_consumer_is_used(self, recording_consumer: RecordingConsumer) -> None:
