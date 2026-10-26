@@ -5,7 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-10-26
+
+First release, published to PyPI as `altissimo-mixpanel`. The import name is
+`altissimo.mixpanel`. Licensed under Apache-2.0.
 
 ### Added
 
@@ -28,4 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `MixpanelError` and `MixpanelImportError` exception hierarchy
 - Lazy SDK import — zero import-time side effects
 - PEP 561 `py.typed` marker
-- CI pipeline with lint, test (Python 3.11–3.13), and build stages
+- CI pipeline with lint, test (Python 3.11–3.13), and build stages, using Poetry 2.4.1 with actions pinned by
+  commit
+- A publish workflow: tagged releases (`v*`) are tested, checked against the package version, built, and uploaded
+  to PyPI through Trusted Publishing (environment `pypi`). Running it by hand uploads the current branch to
+  TestPyPI (environment `testpypi`).
+- Renovate configuration, using the shared `altissimo-hq/renovate-config` preset
