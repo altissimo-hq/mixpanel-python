@@ -37,4 +37,4 @@ class TestDisabledMode:
         disabled_client.track("user-123", "Event")
         disabled_client.people_set("user-123", {"key": "val"})
         disabled_client.alias("a", "b")
-        assert disabled_client._mp is None
+        assert getattr(disabled_client._local, "mp", None) is None

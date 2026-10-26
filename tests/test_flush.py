@@ -35,7 +35,7 @@ class TestFlush:
     def test_flush_with_default_consumer_is_noop(self) -> None:
         client = MixpanelClient(token="test-token")
         client.flush()  # should not raise or build the SDK client
-        assert client._mp is None
+        assert getattr(client._local, "mp", None) is None
 
     def test_flush_with_consumer_without_flush_is_noop(self, client: MixpanelClient) -> None:
         client.flush()  # RecordingConsumer has no flush method

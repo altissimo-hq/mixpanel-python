@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from typing import TYPE_CHECKING, Any, Literal
 
 from altissimo.mixpanel.exceptions import MixpanelImportError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from types import TracebackType
 
     from altissimo.mixpanel.protocol import MixpanelConsumer
@@ -28,6 +30,11 @@ class MixpanelClient:
     The underlying ``Mixpanel`` instance is lazily initialized on the first
     API call, so constructing a ``MixpanelClient`` is side-effect-free.
 
+    One client can be shared across threads: each thread gets its own
+    ``Mixpanel`` instance, and so its own consumer and HTTP session, since
+    neither the SDK's ``Consumer`` (one ``requests.Session``) nor its
+    ``BufferedConsumer`` (unlocked buffers) is safe to share.
+
     When ``enabled=False``, all tracking calls silently no-op without making
     any network requests or importing the SDK.
 
@@ -36,8 +43,16 @@ class MixpanelClient:
         enabled: When ``False``, all calls silently no-op.
         consumer: Optional custom consumer for the Mixpanel SDK, such as
             ``BufferedConsumer`` or anything matching
-            :class:`~altissimo.mixpanel.protocol.MixpanelConsumer`. A
-            consumer that buffers must be flushed with :meth:`flush` (or by
+            :class:`~altissimo.mixpanel.protocol.MixpanelConsumer`. This one
+            object is shared by every thread, so it must be thread-safe if
+            the client is used from more than one; otherwise pass
+            ``consumer_factory``.
+        consumer_factory: Optional callable returning a new consumer, called
+            once per thread that uses the client. Use it instead of
+            ``consumer`` in threaded apps, e.g.
+            ``consumer_factory=lambda: Consumer(request_timeout=5)``.
+
+            A consumer that buffers must be flushed with :meth:`flush` (or by
             using the client as a context manager) before the process exits,
             or the buffered messages are lost.
         on_error: Error handling strategy:
@@ -56,13 +71,21 @@ class MixpanelClient:
         *,
         enabled: bool = True,
         consumer: MixpanelConsumer | None = None,
+        consumer_factory: Callable[[], MixpanelConsumer] | None = None,
         on_error: Literal["log", "raise", "ignore"] = "log",
     ) -> None:
+        if consumer is not None and consumer_factory is not None:
+            raise ValueError("Pass consumer or consumer_factory, not both")
         self._token = token
         self._enabled = enabled
         self._consumer = consumer
+        self._consumer_factory = consumer_factory
         self._on_error = on_error
-        self._mp: Mixpanel | None = None
+        # One Mixpanel instance per thread (see class docstring)
+        self._local = threading.local()
+        # Every consumer consumer_factory made, so flush() reaches all threads'
+        self._factory_consumers: list[MixpanelConsumer] = []
+        self._factory_consumers_lock = threading.Lock()
 
     @classmethod
     def from_env(
@@ -71,6 +94,7 @@ class MixpanelClient:
         token_var: str = "MIXPANEL_TOKEN",  # noqa: S107
         enabled: bool | None = None,
         consumer: MixpanelConsumer | None = None,
+        consumer_factory: Callable[[], MixpanelConsumer] | None = None,
         on_error: Literal["log", "raise", "ignore"] = "log",
     ) -> MixpanelClient:
         """Create a client using environment variables.
@@ -95,6 +119,8 @@ class MixpanelClient:
                 (truthy values: ``1``, ``true``, ``yes``; defaults to
                 ``True`` when the variable is not set).
             consumer: Optional custom consumer (see class docstring).
+            consumer_factory: Optional per-thread consumer factory (see
+                class docstring).
             on_error: Error handling strategy (see class docstring).
 
         Returns:
@@ -123,6 +149,7 @@ class MixpanelClient:
             token=token or "disabled",
             enabled=enabled,
             consumer=consumer,
+            consumer_factory=consumer_factory,
             on_error=on_error,
         )
 
@@ -132,23 +159,30 @@ class MixpanelClient:
         return self._enabled
 
     def _get_mp(self) -> Mixpanel:
-        """Return the lazily-initialized ``Mixpanel`` instance.
+        """Return this thread's ``Mixpanel`` instance, creating it on first use.
 
         Raises:
             MixpanelImportError: If the ``mixpanel`` package is not installed.
         """
-        if self._mp is None:
+        mp: Mixpanel | None = getattr(self._local, "mp", None)
+        if mp is None:
             try:
                 from mixpanel import Mixpanel as _Mixpanel
             except ImportError:
                 raise MixpanelImportError from None
 
             kwargs: dict[str, Any] = {}
-            if self._consumer is not None:
+            if self._consumer_factory is not None:
+                consumer = self._consumer_factory()
+                with self._factory_consumers_lock:
+                    self._factory_consumers.append(consumer)
+                kwargs["consumer"] = consumer
+            elif self._consumer is not None:
                 kwargs["consumer"] = self._consumer
 
-            self._mp = _Mixpanel(self._token, **kwargs)
-        return self._mp
+            mp = _Mixpanel(self._token, **kwargs)
+            self._local.mp = mp
+        return mp
 
     def _handle_error(self, exc: Exception, operation: str, **context: Any) -> None:
         """Handle an exception according to the configured error strategy."""
@@ -331,22 +365,33 @@ class MixpanelClient:
     # ------------------------------------------------------------------
 
     def flush(self) -> None:
-        """Send any messages the consumer is still holding.
+        """Send any messages the consumers are still holding.
 
         Only a buffering consumer such as ``BufferedConsumer`` holds messages;
         it sends them when its buffer fills, so whatever is buffered when the
         process exits is lost unless flushed. With the default consumer, which
         sends each message as it is made, this does nothing.
+
+        With ``consumer_factory`` this flushes the consumer of every thread
+        that has used the client, so call it when no other thread is tracking,
+        such as at shutdown: a buffering consumer isn't safe to flush while
+        its own thread is adding to it.
         """
         if not self._enabled:
             return
-        flush = getattr(self._consumer, "flush", None)
-        if flush is None:
-            return
-        try:
-            flush()
-        except Exception as exc:
-            self._handle_error(exc, "flush")
+        if self._consumer_factory is not None:
+            with self._factory_consumers_lock:
+                consumers = list(self._factory_consumers)
+        else:
+            consumers = [self._consumer] if self._consumer is not None else []
+        for consumer in consumers:
+            flush = getattr(consumer, "flush", None)
+            if flush is None:
+                continue
+            try:
+                flush()
+            except Exception as exc:
+                self._handle_error(exc, "flush")
 
     def __enter__(self) -> MixpanelClient:
         return self

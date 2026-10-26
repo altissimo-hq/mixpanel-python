@@ -119,16 +119,31 @@ with MixpanelClient(token="...", consumer=BufferedConsumer()) as client:
 With the default consumer, which sends each message immediately, `flush()`
 does nothing. A failing flush follows `on_error` like every other call.
 
-`from_env()` takes a consumer too, for example to shorten the request timeout:
-
-```python
-from mixpanel import Consumer
-
-client = MixpanelClient.from_env(consumer=Consumer(request_timeout=5))
-```
-
 Any object with `send(endpoint, json_message)` works as a consumer; the
 `MixpanelConsumer` protocol describes it for type checking.
+
+### Threads
+
+One `MixpanelClient` can be shared across threads, such as a module-level
+client in a web app. Each thread gets its own Mixpanel SDK instance and, with
+the default consumer, its own HTTP session: the SDK's `Consumer` and
+`BufferedConsumer` aren't safe to share between threads.
+
+A `consumer=` is a single object every thread shares, so in a threaded app pass
+a `consumer_factory` instead; it's called once per thread:
+
+```python
+from mixpanel import BufferedConsumer, Consumer
+
+# A shorter request timeout, one consumer per thread
+client = MixpanelClient.from_env(consumer_factory=lambda: Consumer(request_timeout=5))
+
+# Buffered, one buffer per thread
+client = MixpanelClient(token="...", consumer_factory=BufferedConsumer)
+```
+
+`flush()` flushes every thread's consumer. Call it when no other thread is
+tracking, such as at shutdown.
 
 ### Testing with `FakeMixpanelClient`
 
