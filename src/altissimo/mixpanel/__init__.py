@@ -6,7 +6,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 from .client import MixpanelClient
 from .exceptions import MixpanelError, MixpanelImportError
-from .protocol import MixpanelClientProtocol
+from .protocol import MixpanelClientProtocol, MixpanelConsumer
 from .testing import FakeMixpanelClient
 
 try:
@@ -18,6 +18,7 @@ __all__ = [
     "FakeMixpanelClient",
     "MixpanelClient",
     "MixpanelClientProtocol",
+    "MixpanelConsumer",
     "MixpanelError",
     "MixpanelImportError",
     "__version__",

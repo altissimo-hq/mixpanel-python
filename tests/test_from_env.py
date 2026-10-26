@@ -8,6 +8,8 @@ import pytest
 
 from altissimo.mixpanel import MixpanelClient
 
+from .conftest import RecordingConsumer
+
 
 class TestFromEnv:
     """Tests for the from_env() class method."""
@@ -35,17 +37,13 @@ class TestFromEnv:
         assert client.enabled
         assert client._token == "custom-token"
 
-    def test_api_secret_is_read(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_consumer_forwarded(self, monkeypatch: pytest.MonkeyPatch, recording_consumer: RecordingConsumer) -> None:
         monkeypatch.setenv("MIXPANEL_TOKEN", "my-token")
-        monkeypatch.setenv("MIXPANEL_API_SECRET", "my-secret")
-        client = MixpanelClient.from_env()
-        assert client._api_secret == "my-secret"
+        client = MixpanelClient.from_env(consumer=recording_consumer)
 
-    def test_custom_api_secret_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("MIXPANEL_TOKEN", "my-token")
-        monkeypatch.setenv("MY_SECRET", "custom-secret")
-        client = MixpanelClient.from_env(api_secret_var="MY_SECRET")
-        assert client._api_secret == "custom-secret"
+        client.track("user-123", "Event")
+
+        assert len(recording_consumer.sent) == 1
 
     @pytest.mark.parametrize("value", ["false", "False", "FALSE", "no", "0", "nope"])
     def test_mixpanel_enabled_false(self, monkeypatch: pytest.MonkeyPatch, value: str) -> None:

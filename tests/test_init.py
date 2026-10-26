@@ -16,6 +16,7 @@ class TestPublicAPI:
             "FakeMixpanelClient",
             "MixpanelClient",
             "MixpanelClientProtocol",
+            "MixpanelConsumer",
             "MixpanelError",
             "MixpanelImportError",
             "__version__",
@@ -28,6 +29,7 @@ class TestPublicAPI:
             FakeMixpanelClient,
             MixpanelClient,
             MixpanelClientProtocol,
+            MixpanelConsumer,
             MixpanelError,
             MixpanelImportError,
         )
@@ -35,5 +37,6 @@ class TestPublicAPI:
         assert FakeMixpanelClient is not None
         assert MixpanelClient is not None
         assert MixpanelClientProtocol is not None
+        assert MixpanelConsumer is not None
         assert MixpanelError is not None
         assert MixpanelImportError is not None

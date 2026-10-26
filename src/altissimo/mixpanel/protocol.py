@@ -1,8 +1,21 @@
-"""Protocol for Mixpanel client dependency injection."""
+"""Protocols for Mixpanel client dependency injection and custom consumers."""
 
 from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
+
+
+@runtime_checkable
+class MixpanelConsumer(Protocol):
+    """What the Mixpanel SDK needs from a consumer.
+
+    The SDK calls ``send`` with the endpoint (``"events"``, ``"people"``,
+    ``"groups"``) and the JSON-encoded message. The SDK's own ``Consumer`` and
+    ``BufferedConsumer`` match. A consumer that buffers should also have a
+    ``flush()`` method, which :meth:`MixpanelClient.flush` calls when present.
+    """
+
+    def send(self, endpoint: str, json_message: str) -> None: ...
 
 
 @runtime_checkable

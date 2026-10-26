@@ -11,6 +11,7 @@ from altissimo.mixpanel.exceptions import MixpanelImportError
 if TYPE_CHECKING:
     from types import TracebackType
 
+    from altissimo.mixpanel.protocol import MixpanelConsumer
     from mixpanel import Mixpanel
 
 logger = logging.getLogger(__name__)
@@ -32,10 +33,10 @@ class MixpanelClient:
 
     Args:
         token: Mixpanel project token.
-        api_secret: Optional API secret for import endpoints.
         enabled: When ``False``, all calls silently no-op.
-        consumer: Optional custom consumer for the Mixpanel SDK. Supports
-            ``BufferedConsumer`` or any object with a ``send`` method. A
+        consumer: Optional custom consumer for the Mixpanel SDK, such as
+            ``BufferedConsumer`` or anything matching
+            :class:`~altissimo.mixpanel.protocol.MixpanelConsumer`. A
             consumer that buffers must be flushed with :meth:`flush` (or by
             using the client as a context manager) before the process exits,
             or the buffered messages are lost.
@@ -43,19 +44,21 @@ class MixpanelClient:
             - ``"log"`` (default): Catch exceptions and log them.
             - ``"raise"``: Re-raise exceptions to the caller.
             - ``"ignore"``: Silently swallow all exceptions.
+
+            A missing ``mixpanel`` SDK is a setup error rather than a failed
+            call: with ``"raise"`` it is raised, otherwise it is logged once
+            (not with ``"ignore"``) and the client disables itself.
     """
 
     def __init__(
         self,
         token: str,
         *,
-        api_secret: str | None = None,
         enabled: bool = True,
-        consumer: object | None = None,
+        consumer: MixpanelConsumer | None = None,
         on_error: Literal["log", "raise", "ignore"] = "log",
     ) -> None:
         self._token = token
-        self._api_secret = api_secret
         self._enabled = enabled
         self._consumer = consumer
         self._on_error = on_error
@@ -66,8 +69,8 @@ class MixpanelClient:
         cls,
         *,
         token_var: str = "MIXPANEL_TOKEN",  # noqa: S107
-        api_secret_var: str = "MIXPANEL_API_SECRET",  # noqa: S107
         enabled: bool | None = None,
+        consumer: MixpanelConsumer | None = None,
         on_error: Literal["log", "raise", "ignore"] = "log",
     ) -> MixpanelClient:
         """Create a client using environment variables.
@@ -87,12 +90,11 @@ class MixpanelClient:
         Args:
             token_var: Name of the environment variable containing the
                 Mixpanel project token.
-            api_secret_var: Name of the environment variable containing
-                the API secret.
             enabled: Override the enabled state.  If ``None`` (default),
                 reads from the ``MIXPANEL_ENABLED`` environment variable
                 (truthy values: ``1``, ``true``, ``yes``; defaults to
                 ``True`` when the variable is not set).
+            consumer: Optional custom consumer (see class docstring).
             on_error: Error handling strategy (see class docstring).
 
         Returns:
@@ -103,7 +105,6 @@ class MixpanelClient:
                 environment variable is missing or empty.
         """
         token = os.environ.get(token_var, "")
-        api_secret = os.environ.get(api_secret_var)
 
         if not token and enabled is True:
             raise ValueError(f"{token_var} is not set, but enabled=True requires a Mixpanel token")
@@ -120,8 +121,8 @@ class MixpanelClient:
 
         return cls(
             token=token or "disabled",
-            api_secret=api_secret,
             enabled=enabled,
+            consumer=consumer,
             on_error=on_error,
         )
 
@@ -152,7 +153,14 @@ class MixpanelClient:
     def _handle_error(self, exc: Exception, operation: str, **context: Any) -> None:
         """Handle an exception according to the configured error strategy."""
         if self._on_error == "raise":
-            raise
+            raise exc
+        if isinstance(exc, MixpanelImportError):
+            # A setup error, not a failed call: say so once and stop trying,
+            # rather than logging a traceback for every event.
+            self._enabled = False
+            if self._on_error == "log":
+                logger.error("Mixpanel tracking disabled: %s", exc)
+            return
         if self._on_error == "log":
             logger.exception("Mixpanel %s error", operation, extra=context)
 
