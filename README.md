@@ -119,6 +119,17 @@ with MixpanelClient(token="...", consumer=BufferedConsumer()) as client:
 With the default consumer, which sends each message immediately, `flush()`
 does nothing. A failing flush follows `on_error` like every other call.
 
+`from_env()` takes a consumer too, for example to shorten the request timeout:
+
+```python
+from mixpanel import Consumer
+
+client = MixpanelClient.from_env(consumer=Consumer(request_timeout=5))
+```
+
+Any object with `send(endpoint, json_message)` works as a consumer; the
+`MixpanelConsumer` protocol describes it for type checking.
+
 ### Testing with `FakeMixpanelClient`
 
 ```python
@@ -168,7 +179,6 @@ class OrderService:
 | Variable | Default | Description |
 |---|---|---|
 | `MIXPANEL_TOKEN` | — | Mixpanel project token |
-| `MIXPANEL_API_SECRET` | — | API secret for import endpoints |
 | `MIXPANEL_ENABLED` | `true` | Set to `false`/`0`/`no` to disable |
 
 ## Development
