@@ -30,6 +30,7 @@ class FakeMixpanelClient:
     people_unions: list[tuple[str, dict[str, Any], dict[str, Any] | None]] = field(default_factory=list)
     people_unsets: list[tuple[str, list[str], dict[str, Any] | None]] = field(default_factory=list)
     aliases: list[tuple[str, str, dict[str, Any] | None]] = field(default_factory=list)
+    flush_count: int = 0
 
     def track(
         self,
@@ -101,3 +102,7 @@ class FakeMixpanelClient:
     ) -> None:
         """Record an alias call."""
         self.aliases.append((alias_id, original_id, meta))
+
+    def flush(self) -> None:
+        """Record a flush call."""
+        self.flush_count += 1
