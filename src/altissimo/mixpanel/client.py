@@ -72,9 +72,17 @@ class MixpanelClient:
     ) -> MixpanelClient:
         """Create a client using environment variables.
 
-        If the token environment variable is not set, the client is created
-        in disabled mode rather than raising an error.  Analytics should never
-        be a hard dependency.
+        What happens when the token environment variable is missing or empty
+        depends on how tracking was turned on:
+
+        - ``enabled=True`` passed explicitly: raises ``ValueError``. The caller
+          said this process must send events, so a missing secret should fail
+          at startup rather than look like Mixpanel going quiet.
+        - ``enabled`` left as ``None``: the client is disabled and a warning
+          naming the variable is logged. Analytics should never be a hard
+          dependency by default.
+        - ``enabled=False``, or ``MIXPANEL_ENABLED`` falsey: the client is
+          disabled with no warning, as tracking was turned off deliberately.
 
         Args:
             token_var: Name of the environment variable containing the
@@ -89,16 +97,25 @@ class MixpanelClient:
 
         Returns:
             A configured ``MixpanelClient`` instance.
+
+        Raises:
+            ValueError: If ``enabled=True`` was passed and the token
+                environment variable is missing or empty.
         """
         token = os.environ.get(token_var, "")
         api_secret = os.environ.get(api_secret_var)
+
+        if not token and enabled is True:
+            raise ValueError(f"{token_var} is not set, but enabled=True requires a Mixpanel token")
 
         if enabled is None:
             env_enabled = os.environ.get("MIXPANEL_ENABLED")
             enabled = env_enabled.lower() in ("1", "true", "yes") if env_enabled is not None else True
 
-        # Missing token → disabled mode
+        # Missing token → disabled mode, said once unless tracking was off anyway
         if not token:
+            if enabled:
+                logger.warning("Mixpanel tracking disabled: %s is not set", token_var)
             enabled = False
 
         return cls(
