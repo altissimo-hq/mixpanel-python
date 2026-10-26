@@ -30,7 +30,7 @@ pip install altissimo-mixpanel
 from altissimo.mixpanel import MixpanelClient
 
 # Reads MIXPANEL_TOKEN from environment
-# Missing token → disabled mode (no error)
+# Missing token → disabled mode, with a warning (see Disabled Mode)
 client = MixpanelClient.from_env()
 
 # Track an event
@@ -61,11 +61,26 @@ client.track("user-123", "Page Viewed")  # silently does nothing
 # MIXPANEL_ENABLED=false → disabled
 client = MixpanelClient.from_env()
 
-# Missing token → automatically disabled
+# Missing token → automatically disabled, and a warning names the variable
 # (no MIXPANEL_TOKEN set)
 client = MixpanelClient.from_env()
 assert not client.enabled
 ```
+
+When the token is missing, `from_env()` behaves according to how tracking was
+turned on:
+
+| `enabled` | Missing or empty token |
+| --- | --- |
+| `True` (passed explicitly) | Raises `ValueError` naming the variable |
+| `None` (default; `MIXPANEL_ENABLED` unset or truthy) | Disabled, one warning naming the variable |
+| `False`, or `MIXPANEL_ENABLED` falsey | Disabled, no warning |
+
+Pass `enabled=True` where a deployment must send events, so a missing secret
+fails at startup instead of looking like Mixpanel going quiet. An app that only
+sends events when deployed can pass that condition, e.g.
+`MixpanelClient.from_env(enabled=IS_DEPLOYED)`: quiet locally, an error on a
+deployment missing its token.
 
 ### Error Handling
 
