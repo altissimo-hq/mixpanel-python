@@ -6,7 +6,7 @@ Reusable, typed Mixpanel analytics client for Altissimo projects.
 
 - **Typed API** — full type annotations for all operations
 - **Lazy SDK import** — `mixpanel` is imported only when needed, zero import-time side effects
-- **Disabled mode** — silently no-op all calls when analytics isn't configured
+- **Disabled mode** — no-op all calls when analytics is turned off or isn't configured
 - **Error handling** — swallow-and-log by default, configurable via `on_error`
 - **Protocol for DI** — `MixpanelClientProtocol` for dependency injection
 - **Test helpers** — `FakeMixpanelClient` records all calls in-memory
@@ -14,9 +14,12 @@ Reusable, typed Mixpanel analytics client for Altissimo projects.
 
 ## Installation
 
+Published on PyPI as [`altissimo-mixpanel`](https://pypi.org/project/altissimo-mixpanel/);
+the import name is `altissimo.mixpanel`.
+
 ```bash
 # With the Mixpanel SDK (recommended)
-pip install altissimo-mixpanel[mixpanel]
+pip install "altissimo-mixpanel[mixpanel]"
 
 # Without the SDK (for type checking / protocol-only usage)
 pip install altissimo-mixpanel
@@ -217,4 +220,4 @@ poetry run ruff format .
 
 ## License
 
-[GPL-3.0-or-later](LICENSE)
+[Apache-2.0](LICENSE)
