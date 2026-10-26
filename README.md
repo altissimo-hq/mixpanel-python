@@ -89,6 +89,21 @@ from mixpanel import BufferedConsumer
 client = MixpanelClient(token="...", consumer=BufferedConsumer())
 ```
 
+A `BufferedConsumer` only sends when its buffer fills, so flush it before the
+process exits (a Cloud Run instance shutting down, a job or CLI command
+finishing), or the buffered events are lost:
+
+```python
+client.flush()
+
+# Or flush automatically when the block ends, even if it raises:
+with MixpanelClient(token="...", consumer=BufferedConsumer()) as client:
+    client.track("user-123", "Job Finished")
+```
+
+With the default consumer, which sends each message immediately, `flush()`
+does nothing. A failing flush follows `on_error` like every other call.
+
 ### Testing with `FakeMixpanelClient`
 
 ```python

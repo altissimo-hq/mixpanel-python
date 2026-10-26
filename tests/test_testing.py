@@ -17,6 +17,13 @@ class TestFakeMixpanelClient:
         assert fake.people_unions == []
         assert fake.people_unsets == []
         assert fake.aliases == []
+        assert fake.flush_count == 0
+
+    def test_flush_records(self) -> None:
+        fake = FakeMixpanelClient()
+        fake.flush()
+        fake.flush()
+        assert fake.flush_count == 2
 
     def test_track_records(self) -> None:
         fake = FakeMixpanelClient()

@@ -33,6 +33,20 @@ class FailingConsumer:
         raise self.error
 
 
+@dataclass
+class FailingFlushConsumer:
+    """A buffering consumer whose flush always raises an exception."""
+
+    error: Exception = field(default_factory=lambda: RuntimeError("Flush failed"))
+
+    def send(self, endpoint: str, json_message: str, api_key: str | None = None) -> None:
+        """Accept the message without sending it."""
+
+    def flush(self) -> None:
+        """Always raise an error."""
+        raise self.error
+
+
 @pytest.fixture
 def recording_consumer() -> RecordingConsumer:
     """Provide a fresh recording consumer."""

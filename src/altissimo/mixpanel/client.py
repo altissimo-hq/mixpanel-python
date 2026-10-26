@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Any, Literal
 from altissimo.mixpanel.exceptions import MixpanelImportError
 
 if TYPE_CHECKING:
+    from types import TracebackType
+
     from mixpanel import Mixpanel
 
 logger = logging.getLogger(__name__)
@@ -33,7 +35,10 @@ class MixpanelClient:
         api_secret: Optional API secret for import endpoints.
         enabled: When ``False``, all calls silently no-op.
         consumer: Optional custom consumer for the Mixpanel SDK. Supports
-            ``BufferedConsumer`` or any object with a ``send`` method.
+            ``BufferedConsumer`` or any object with a ``send`` method. A
+            consumer that buffers must be flushed with :meth:`flush` (or by
+            using the client as a context manager) before the process exits,
+            or the buffered messages are lost.
         on_error: Error handling strategy:
             - ``"log"`` (default): Catch exceptions and log them.
             - ``"raise"``: Re-raise exceptions to the caller.
@@ -295,3 +300,37 @@ class MixpanelClient:
             self._get_mp().alias(alias_id, original_id, meta)
         except Exception as exc:
             self._handle_error(exc, "alias")
+
+    # ------------------------------------------------------------------
+    # Delivery
+    # ------------------------------------------------------------------
+
+    def flush(self) -> None:
+        """Send any messages the consumer is still holding.
+
+        Only a buffering consumer such as ``BufferedConsumer`` holds messages;
+        it sends them when its buffer fills, so whatever is buffered when the
+        process exits is lost unless flushed. With the default consumer, which
+        sends each message as it is made, this does nothing.
+        """
+        if not self._enabled:
+            return
+        flush = getattr(self._consumer, "flush", None)
+        if flush is None:
+            return
+        try:
+            flush()
+        except Exception as exc:
+            self._handle_error(exc, "flush")
+
+    def __enter__(self) -> MixpanelClient:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        """Flush on leaving the ``with`` block, including when it raised."""
+        self.flush()
