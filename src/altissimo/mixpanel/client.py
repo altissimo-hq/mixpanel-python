@@ -195,7 +195,7 @@ class MixpanelClient:
                 # exits; flush and release its consumer then. A weak reference
                 # to the client, so a live thread doesn't keep the client alive.
                 finalizer = weakref.finalize(mp, MixpanelClient._retire_consumer, weakref.ref(self), entry)
-                finalizer.atexit = False
+                finalizer.atexit = False  # type: ignore[misc]  # documented, but missing from typeshed's __slots__
         return mp
 
     @staticmethod
