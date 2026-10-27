@@ -12,7 +12,7 @@ from .testing import FakeMixpanelClient
 try:
     __version__ = version("altissimo-mixpanel")
 except PackageNotFoundError:
-    __version__ = "0.1.0"
+    __version__ = "0.0.0"
 
 __all__ = [
     "FakeMixpanelClient",
