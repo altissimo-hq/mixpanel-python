@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-10-26
+
+### Fixed
+
+- With `consumer_factory`, a thread's consumer is now flushed and released when the thread exits. Before, the client
+  held every consumer it had made, and events buffered by exited threads (such as idle workers a thread pool retires)
+  waited until the next `flush()`. `flush()` also releases any exited thread's consumer still held
+- Leaving a `with` block that raised no longer replaces its exception with a flush error under `on_error="raise"`;
+  the flush error is logged instead
+- The `mixpanel` extra is limited to `mixpanel>=4.0,<6`
+- `__version__` falls back to `0.0.0` instead of a stale hardcoded version when package metadata is missing
+
 ## [0.1.0] - 2026-10-26
 
 First release, published to PyPI as `altissimo-mixpanel`. The import name is

@@ -1,6 +1,6 @@
 [project]
 name = "altissimo-mixpanel"
-version = "0.1.0"
+version = "0.1.1"
 description = "Reusable Mixpanel analytics client for Altissimo projects"
 readme = "README.md"
 license = "Apache-2.0"
@@ -22,7 +22,7 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-mixpanel = ["mixpanel>=4.0"]
+mixpanel = ["mixpanel>=4.0,<6"]
 
 [project.urls]
 Homepage = "https://github.com/altissimo-hq/mixpanel-python"
@@ -47,7 +47,7 @@ ruff = ">=0.11"
 pre-commit = ">=4.0"
 
 # Include mixpanel in dev for testing
-mixpanel = ">=4.0"
+mixpanel = ">=4.0,<6"
 
 [tool.ruff]
 target-version = "py311"

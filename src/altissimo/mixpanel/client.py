@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import weakref
 from typing import TYPE_CHECKING, Any, Literal
 
 from altissimo.mixpanel.exceptions import MixpanelImportError
@@ -52,9 +53,13 @@ class MixpanelClient:
             ``consumer`` in threaded apps, e.g.
             ``consumer_factory=lambda: Consumer(request_timeout=5)``.
 
-            A consumer that buffers must be flushed with :meth:`flush` (or by
-            using the client as a context manager) before the process exits,
-            or the buffered messages are lost.
+            When a thread that used the client exits, its consumer is
+            flushed and released, so short-lived threads, such as an idle
+            worker a thread pool retires, don't leave buffered messages
+            behind. A consumer that buffers must still be flushed with
+            :meth:`flush` (or by using the client as a context manager)
+            before the process exits, or the buffered messages of threads
+            still running are lost.
         on_error: Error handling strategy:
             - ``"log"`` (default): Catch exceptions and log them.
             - ``"raise"``: Re-raise exceptions to the caller.
@@ -83,8 +88,9 @@ class MixpanelClient:
         self._on_error = on_error
         # One Mixpanel instance per thread (see class docstring)
         self._local = threading.local()
-        # Every consumer consumer_factory made, so flush() reaches all threads'
-        self._factory_consumers: list[MixpanelConsumer] = []
+        # The consumer consumer_factory made for each thread still using the
+        # client, with its thread, so flush() reaches all threads' consumers
+        self._factory_consumers: list[tuple[threading.Thread, MixpanelConsumer]] = []
         self._factory_consumers_lock = threading.Lock()
 
     @classmethod
@@ -172,17 +178,56 @@ class MixpanelClient:
                 raise MixpanelImportError from None
 
             kwargs: dict[str, Any] = {}
+            entry: tuple[threading.Thread, MixpanelConsumer] | None = None
             if self._consumer_factory is not None:
                 consumer = self._consumer_factory()
+                entry = (threading.current_thread(), consumer)
                 with self._factory_consumers_lock:
-                    self._factory_consumers.append(consumer)
+                    self._factory_consumers.append(entry)
                 kwargs["consumer"] = consumer
             elif self._consumer is not None:
                 kwargs["consumer"] = self._consumer
 
             mp = _Mixpanel(self._token, **kwargs)
             self._local.mp = mp
+            if entry is not None:
+                # The thread's Mixpanel instance is released when the thread
+                # exits; flush and release its consumer then. A weak reference
+                # to the client, so a live thread doesn't keep the client alive.
+                finalizer = weakref.finalize(mp, MixpanelClient._retire_consumer, weakref.ref(self), entry)
+                finalizer.atexit = False
         return mp
+
+    @staticmethod
+    def _retire_consumer(
+        client_ref: weakref.ref[MixpanelClient],
+        entry: tuple[threading.Thread, MixpanelConsumer],
+    ) -> None:
+        """Flush and release the consumer of a thread that has exited.
+
+        No caller is left to raise to, so a flush error is logged (not with
+        ``on_error="ignore"``) instead of raised.
+        """
+        client = client_ref()
+        if client is None:
+            return
+        with client._factory_consumers_lock:
+            if not any(e is entry for e in client._factory_consumers):
+                return  # flush() already released it
+            client._factory_consumers = [e for e in client._factory_consumers if e is not entry]
+        if not client._enabled:
+            return
+        try:
+            client._flush_consumer(entry[1])
+        except Exception:
+            if client._on_error != "ignore":
+                logger.exception("Mixpanel flush error for exited thread %s", entry[0].name)
+
+    @staticmethod
+    def _flush_consumer(consumer: MixpanelConsumer) -> None:
+        flush = getattr(consumer, "flush", None)
+        if flush is not None:
+            flush()
 
     def _handle_error(self, exc: Exception, operation: str, **context: Any) -> None:
         """Handle an exception according to the configured error strategy."""
@@ -375,21 +420,22 @@ class MixpanelClient:
         With ``consumer_factory`` this flushes the consumer of every thread
         that has used the client, so call it when no other thread is tracking,
         such as at shutdown: a buffering consumer isn't safe to flush while
-        its own thread is adding to it.
+        its own thread is adding to it. It also releases the consumers of
+        threads that have exited, if any are still held.
         """
         if not self._enabled:
             return
         if self._consumer_factory is not None:
             with self._factory_consumers_lock:
-                consumers = list(self._factory_consumers)
+                entries = self._factory_consumers
+                # Flush exited threads' consumers one last time, then release them
+                self._factory_consumers = [e for e in entries if e[0].is_alive()]
+            consumers = [consumer for _, consumer in entries]
         else:
             consumers = [self._consumer] if self._consumer is not None else []
         for consumer in consumers:
-            flush = getattr(consumer, "flush", None)
-            if flush is None:
-                continue
             try:
-                flush()
+                self._flush_consumer(consumer)
             except Exception as exc:
                 self._handle_error(exc, "flush")
 
@@ -402,5 +448,15 @@ class MixpanelClient:
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> None:
-        """Flush on leaving the ``with`` block, including when it raised."""
-        self.flush()
+        """Flush on leaving the ``with`` block, including when it raised.
+
+        If the block raised, a flush error is logged rather than raised, so
+        it doesn't replace the block's own exception.
+        """
+        if exc is None:
+            self.flush()
+            return
+        try:
+            self.flush()
+        except Exception:
+            logger.exception("Mixpanel flush error while leaving a with block that raised")

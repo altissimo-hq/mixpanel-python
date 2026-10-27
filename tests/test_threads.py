@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import gc
+import logging
 import threading
+import weakref
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
@@ -10,7 +13,7 @@ import pytest
 
 from altissimo.mixpanel import MixpanelClient
 
-from .conftest import RecordingConsumer
+from .conftest import BufferingConsumer, FailingFlushConsumer, RecordingConsumer
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -134,6 +137,97 @@ class TestFlushAcrossThreads:
 
         failing.flush.assert_called_once_with()
         ok.flush.assert_called_once_with()
+
+
+class TestExitedThreads:
+    """A thread's factory consumer is flushed and released when the thread exits."""
+
+    def test_short_lived_threads_leave_nothing_behind(self) -> None:
+        # Like a thread pool retiring idle workers in a long-running service
+        made: list[BufferingConsumer] = []
+        lock = threading.Lock()
+
+        def factory() -> BufferingConsumer:
+            consumer = BufferingConsumer()
+            with lock:
+                made.append(consumer)
+            return consumer
+
+        client = MixpanelClient(token="test-token", consumer_factory=factory)
+        for _ in range(200):
+            thread = threading.Thread(target=lambda: client.track("user-123", "Event"))
+            thread.start()
+            thread.join()
+
+        assert len(made) == 200
+        assert client._factory_consumers == []
+        assert all(consumer.buffer == [] and len(consumer.sent) == 1 for consumer in made)
+
+    def test_flush_error_in_exited_thread_is_logged(self, caplog: pytest.LogCaptureFixture) -> None:
+        client = MixpanelClient(token="test-token", consumer_factory=FailingFlushConsumer, on_error="raise")
+
+        with caplog.at_level(logging.ERROR):
+            _run_in_threads(lambda: client.track("user-123", "Event"), count=1)
+
+        assert "Mixpanel flush error for exited thread" in caplog.text
+        assert client._factory_consumers == []
+
+    def test_flush_error_in_exited_thread_ignored(self, caplog: pytest.LogCaptureFixture) -> None:
+        client = MixpanelClient(token="test-token", consumer_factory=FailingFlushConsumer, on_error="ignore")
+
+        with caplog.at_level(logging.ERROR):
+            _run_in_threads(lambda: client.track("user-123", "Event"), count=1)
+
+        assert "Mixpanel" not in caplog.text
+
+    def test_exited_thread_not_flushed_when_disabled(self) -> None:
+        consumer = MagicMock()
+        client = MixpanelClient(token="test-token", consumer_factory=lambda: consumer)
+
+        def track_then_disable() -> None:
+            client.track("user-123", "Event")
+            client._enabled = False
+
+        _run_in_threads(track_then_disable, count=1)
+
+        consumer.flush.assert_not_called()
+        assert client._factory_consumers == []
+
+    def test_flush_releases_exited_threads_still_held(self) -> None:
+        # If an exited thread's Mixpanel instance is still referenced, its
+        # consumer isn't released at exit; flush() sends and releases it
+        consumer = MagicMock()
+        client = MixpanelClient(token="test-token", consumer_factory=lambda: consumer)
+        kept: list[Mixpanel] = []
+        _run_in_threads(lambda: kept.append(client._get_mp()), count=1)
+        assert len(client._factory_consumers) == 1
+
+        client.flush()
+        client.flush()
+
+        consumer.flush.assert_called_once_with()
+        assert client._factory_consumers == []
+
+    def test_flush_keeps_live_threads_consumers(self) -> None:
+        consumer = MagicMock()
+        client = MixpanelClient(token="test-token", consumer_factory=lambda: consumer)
+        client.track("user-123", "Event")  # the main thread stays alive
+
+        client.flush()
+        client.flush()
+
+        assert consumer.flush.call_count == 2
+        assert len(client._factory_consumers) == 1
+
+    def test_live_thread_doesnt_keep_client_alive(self) -> None:
+        client = MixpanelClient(token="test-token", consumer_factory=MagicMock)
+        client.track("user-123", "Event")
+        client_ref = weakref.ref(client)
+
+        del client
+        gc.collect()
+
+        assert client_ref() is None
 
 
 class TestConsumerArguments:

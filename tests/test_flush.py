@@ -67,6 +67,21 @@ class TestContextManager:
 
         consumer.flush.assert_called_once_with()
 
+    def test_flush_error_doesnt_replace_block_exception(self, caplog: pytest.LogCaptureFixture) -> None:
+        client = MixpanelClient(token="test-token", consumer=FailingFlushConsumer(), on_error="raise")
+
+        with caplog.at_level(logging.ERROR), pytest.raises(ValueError, match="boom"), client:
+            raise ValueError("boom")
+
+        assert "Mixpanel flush error while leaving a with block that raised" in caplog.text
+        assert "Flush failed" in caplog.text
+
+    def test_flush_error_raised_when_block_succeeds(self) -> None:
+        client = MixpanelClient(token="test-token", consumer=FailingFlushConsumer(), on_error="raise")
+
+        with pytest.raises(RuntimeError, match="Flush failed"), client:
+            pass
+
     def test_track_then_exit_sends_buffered_events(self) -> None:
         with patch("mixpanel.Consumer.send") as send:
             with MixpanelClient(token="test-token", consumer=BufferedConsumer()) as client:
